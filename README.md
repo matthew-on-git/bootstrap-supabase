@@ -1,6 +1,6 @@
 # Project Name
 
-> **Beta** -- DevRail is under active development. Standards, tooling, and templates may change without notice. See [STABILITY.md](STABILITY.md) for details.
+> Built with [DevRail](https://devrail.dev) `v1` standards. See [STABILITY.md](STABILITY.md) for component status.
 
 > One-line project description.
 
