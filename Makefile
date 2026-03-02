@@ -636,6 +636,7 @@ _scan: _check-config
 _docs: _check-config
 	@start_time=$$(date +%s%3N); \
 	overall_exit=0; \
+	generators=""; \
 	modules=""; \
 	if [ -n "$(HAS_TERRAFORM)" ]; then \
 		tf_dirs=$$(find . -name '*.tf' -not -path './.git/*' -not -path './.terraform/*' 2>/dev/null | xargs -I{} dirname {} | sort -u); \
@@ -644,18 +645,74 @@ _docs: _check-config
 				terraform-docs markdown table --output-file README.md "$$dir" || overall_exit=1; \
 				modules="$${modules}\"$$dir\","; \
 			done; \
+			generators="$${generators}\"terraform-docs\","; \
 		else \
 			echo '{"level":"info","msg":"skipping terraform-docs: no .tf files found","language":"terraform"}' >&2; \
 		fi; \
 	fi; \
+	mkdir -p .devrail-output; \
+	_sep=""; \
+	_tv() { _out=$$(eval "$$2" 2>&1 | grep -oE '[0-9]+\.[0-9]+[^ ]*' | head -1); \
+		[ -z "$$_out" ] && _out="unknown"; \
+		printf '%s"%s":"%s"' "$$_sep" "$$1" "$$_out"; _sep=","; }; \
+	{ \
+		printf '{"generated_at":"%s","tools":{' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+		if [ -n "$(HAS_PYTHON)" ]; then \
+			_tv ruff "ruff --version"; \
+			_tv bandit "bandit --version"; \
+			_tv mypy "mypy --version"; \
+			_tv pytest "pytest --version"; \
+			_tv semgrep "semgrep --version"; \
+		fi; \
+		if [ -n "$(HAS_BASH)" ]; then \
+			_tv shellcheck "shellcheck --version"; \
+			_tv shfmt "shfmt --version"; \
+			_tv bats "bats --version"; \
+		fi; \
+		if [ -n "$(HAS_TERRAFORM)" ]; then \
+			_tv terraform "terraform version"; \
+			_tv tflint "tflint --version"; \
+			_tv tfsec "tfsec --version"; \
+			_tv checkov "checkov --version"; \
+			_tv terraform-docs "terraform-docs --version"; \
+		fi; \
+		if [ -n "$(HAS_ANSIBLE)" ]; then \
+			_tv ansible-lint "ansible-lint --version"; \
+			_tv molecule "molecule --version"; \
+		fi; \
+		if [ -n "$(HAS_RUBY)" ]; then \
+			_tv rubocop "rubocop --version"; \
+			_tv reek "reek --version"; \
+			_tv brakeman "brakeman --version"; \
+			_tv bundler-audit "bundler-audit --version"; \
+			_tv rspec "rspec --version"; \
+			_tv srb "srb --version"; \
+		fi; \
+		if [ -n "$(HAS_GO)" ]; then \
+			_tv go "go version"; \
+			_tv golangci-lint "golangci-lint version"; \
+			_tv gofumpt "gofumpt --version"; \
+			_tv govulncheck "govulncheck -version"; \
+		fi; \
+		if [ -n "$(HAS_JAVASCRIPT)" ]; then \
+			_tv node "node --version"; \
+			_tv npm "npm --version"; \
+			_tv eslint "eslint --version"; \
+			_tv prettier "prettier --version"; \
+			_tv tsc "tsc --version"; \
+			_tv vitest "vitest --version"; \
+		fi; \
+		_tv trivy "trivy --version"; \
+		_tv gitleaks "gitleaks version"; \
+		printf '}}\n'; \
+	} > .devrail-output/tool-versions.json; \
+	generators="$${generators}\"tool-versions\","; \
 	end_time=$$(date +%s%3N); \
 	duration=$$((end_time - start_time)); \
-	if [ -z "$(HAS_TERRAFORM)" ]; then \
-		echo "{\"target\":\"docs\",\"status\":\"skip\",\"reason\":\"no docs targets configured\",\"duration_ms\":$$duration}"; \
-	elif [ $$overall_exit -eq 0 ]; then \
-		echo "{\"target\":\"docs\",\"status\":\"pass\",\"duration_ms\":$$duration,\"modules\":[$${modules%,}]}"; \
+	if [ $$overall_exit -eq 0 ]; then \
+		echo "{\"target\":\"docs\",\"status\":\"pass\",\"duration_ms\":$$duration,\"generators\":[$${generators%,}],\"modules\":[$${modules%,}]}"; \
 	else \
-		echo "{\"target\":\"docs\",\"status\":\"fail\",\"duration_ms\":$$duration,\"modules\":[$${modules%,}]}"; \
+		echo "{\"target\":\"docs\",\"status\":\"fail\",\"duration_ms\":$$duration,\"generators\":[$${generators%,}],\"modules\":[$${modules%,}]}"; \
 	fi; \
 	exit $$overall_exit
 

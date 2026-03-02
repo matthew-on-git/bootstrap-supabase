@@ -51,7 +51,7 @@ Every DevRail-managed repo exposes these public targets:
 | `make test` | Run all test suites for declared languages |
 | `make security` | Run security scanners (bandit, tfsec, checkov, etc.) |
 | `make scan` | Run universal scanners (trivy, gitleaks) |
-| `make docs` | Generate documentation (terraform-docs, etc.) |
+| `make docs` | Generate documentation (terraform-docs, tool version report) |
 | `make check` | Run all of the above in sequence |
 | `make install-hooks` | Install pre-commit hooks |
 
