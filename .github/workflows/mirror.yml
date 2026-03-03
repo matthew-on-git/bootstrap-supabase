@@ -21,4 +21,4 @@ jobs:
           echo "$GITLAB_MIRROR_SSH_KEY" | ssh-add -
           mkdir -p ~/.ssh
           ssh-keyscan gitlab.com >> ~/.ssh/known_hosts
-          git push git@gitlab.com:devrail-dev/gitlab-repo-template.git HEAD:main
+          git push --force git@gitlab.com:devrail-dev/gitlab-repo-template.git HEAD:main
