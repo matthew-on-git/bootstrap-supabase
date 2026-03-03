@@ -54,7 +54,7 @@ Every DevRail-managed repo exposes these public targets:
 | `make docs` | Generate documentation (terraform-docs, tool version report) |
 | `make changelog` | Generate CHANGELOG.md from conventional commits (git-cliff) |
 | `make check` | Run all of the above in sequence |
-| `make install-hooks` | Install pre-commit hooks |
+| `make install-hooks` | Install pre-commit and pre-push hooks |
 | `make init` | Scaffold config files for declared languages |
 
 ### Naming Rules

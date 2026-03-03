@@ -85,3 +85,15 @@ repos:
   #   hooks:
   #     - id: terraform-docs-go
   #       args: [--output-file, README.md]
+
+  # --- Pre-Push: Full Check Gate ---
+  # Runs make check before every push. Skip with: git push --no-verify
+  - repo: local
+    hooks:
+      - id: make-check
+        name: make check
+        entry: make check
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [pre-push]

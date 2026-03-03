@@ -91,7 +91,8 @@ install-hooks: ## Install pre-commit hooks
 	fi
 	@pre-commit install
 	@pre-commit install --hook-type commit-msg
-	@echo "Pre-commit hooks installed successfully. Hooks will run on every commit."
+	@pre-commit install --hook-type pre-push
+	@echo "Pre-commit hooks installed successfully. Hooks will run on commit and push."
 
 lint: ## Run all linters
 	$(DOCKER_RUN) make _lint

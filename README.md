@@ -41,7 +41,7 @@ check                Run all checks (lint, format, test, security, docs)
 docs                 Generate documentation
 format               Run all formatters
 help                 Show this help
-install-hooks        Install pre-commit hooks
+install-hooks        Install pre-commit and pre-push hooks
 lint                 Run all linters
 scan                 Run full scan (lint + security)
 security             Run security scanners
