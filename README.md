@@ -39,6 +39,7 @@ All project tasks are managed through the Makefile. Run `make help` to see avail
 ```
 check                Run all checks (lint, format, test, security, docs)
 docs                 Generate documentation
+fix                  Auto-fix formatting issues in-place
 format               Run all formatters
 help                 Show this help
 install-hooks        Install pre-commit and pre-push hooks

@@ -48,6 +48,7 @@ Every DevRail-managed repo exposes these public targets:
 | `make help` | List all targets with descriptions (default target) |
 | `make lint` | Run all linters for declared languages |
 | `make format` | Run all formatters for declared languages |
+| `make fix` | Auto-fix formatting issues in-place |
 | `make test` | Run all test suites for declared languages |
 | `make security` | Run security scanners (bandit, tfsec, checkov, etc.) |
 | `make scan` | Run universal scanners (trivy, gitleaks) |

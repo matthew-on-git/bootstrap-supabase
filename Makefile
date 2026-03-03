@@ -44,8 +44,8 @@ HAS_JAVASCRIPT := $(filter javascript,$(LANGUAGES))
 # ---------------------------------------------------------------------------
 # .PHONY declarations
 # ---------------------------------------------------------------------------
-.PHONY: help lint format test security scan docs changelog check install-hooks init
-.PHONY: _lint _format _test _security _scan _docs _changelog _check _check-config _init
+.PHONY: help lint format fix test security scan docs changelog check install-hooks init
+.PHONY: _lint _format _fix _test _security _scan _docs _changelog _check _check-config _init
 
 # ===========================================================================
 # Public targets (run on host, delegate to Docker container)
@@ -65,6 +65,9 @@ check: ## Run all checks (lint, format, test, security, scan, docs)
 
 docs: ## Generate documentation
 	$(DOCKER_RUN) make _docs
+
+fix: ## Auto-fix formatting issues in-place
+	$(DOCKER_RUN) make _fix
 
 format: ## Run all formatters
 	$(DOCKER_RUN) make _format
