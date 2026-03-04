@@ -71,6 +71,16 @@ repos:
   #   hooks:
   #     - id: prettier
 
+  # --- Rust (uncomment if languages includes rust) ---
+  # Formatting and linting with cargo
+  # - repo: https://github.com/AndrejOrsula/pre-commit-cargo
+  #   rev: v0.4.0
+  #   hooks:
+  #     - id: cargo-fmt
+  #       args: ["--all", "--", "--check"]
+  #     - id: cargo-clippy
+  #       args: ["--all-targets", "--all-features", "--workspace", "--", "-D", "warnings"]
+
   # --- Secret Detection ---
   # Detects hardcoded secrets, API keys, and credentials in code
   - repo: https://github.com/gitleaks/gitleaks

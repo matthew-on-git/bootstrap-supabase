@@ -19,6 +19,10 @@ Critical Rules:
 6. Use the shared logging library. No raw `echo` for status messages. Use
    `log_info`, `log_warn`, `log_error`, `log_debug`, and `die` from
    `lib/log.sh`.
+7. Never suppress failing checks. When a lint, format, security, or test
+   check fails, fix the underlying issue. Never comment out code, add
+   suppression annotations, disable rules, or mark CI jobs as
+   allowed-to-fail to bypass a failing check.
 
 Quick Reference:
 
