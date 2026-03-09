@@ -6,7 +6,7 @@ repos:
   # --- Conventional Commits ---
   # Enforces type(scope): description format on commit messages
   - repo: https://github.com/devrail-dev/pre-commit-conventional-commits
-    rev: v1.0.0
+    rev: v1.1.0
     hooks:
       - id: conventional-commits
 
