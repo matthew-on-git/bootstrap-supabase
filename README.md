@@ -1,160 +1,240 @@
-# Project Name
+# Bootstrap Supabase
 
 > Built with [DevRail](https://devrail.dev) `v1` standards. See [STABILITY.md](STABILITY.md) for component status.
 
-> One-line project description.
+> Idempotent installer for self-hosted Supabase on Ubuntu 22.04 / 24.04.
 
-<!-- TODO: Replace badge URLs with actual project paths -->
-[![pipeline status](https://gitlab.com/NAMESPACE/PROJECT/badges/main/pipeline.svg)](https://gitlab.com/NAMESPACE/PROJECT/-/commits/main)
+[![pipeline status](https://gitlab.mfsoho.linkridge.net/hardware-infra/supabase/badges/main/pipeline.svg)](https://gitlab.mfsoho.linkridge.net/hardware-infra/supabase/-/commits/main)
 [![DevRail compliant](https://devrail.dev/images/badge.svg)](https://devrail.dev)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+## What It Deploys
+
+A single `install.sh` deploys the full Supabase stack via Docker Compose:
+
+| Service | Image | Role |
+|---------|-------|------|
+| db | supabase/postgres | PostgreSQL with Supabase extensions |
+| kong | kong/kong | API gateway (single entry point) |
+| auth | supabase/gotrue | Authentication (GoTrue) |
+| rest | postgrest/postgrest | REST API (PostgREST) |
+| realtime | supabase/realtime | WebSocket subscriptions |
+| storage | supabase/storage-api | File storage API |
+| imgproxy | darthsim/imgproxy | Image transformations |
+| meta | supabase/postgres-meta | Database management for Studio |
+| functions | supabase/edge-runtime | Deno edge functions |
+| studio | supabase/studio | Dashboard UI |
+| analytics | supabase/logflare | Log analytics (optional) |
+| vector | timberio/vector | Log collection (optional) |
+
+All component versions are pinned to a tested set. No `:latest` tags.
 
 ## Quick Start
 
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://gitlab.com/NAMESPACE/PROJECT.git
-   cd PROJECT
-   ```
-
-2. **Configure your languages** in `.devrail.yml`:
-
-   ```yaml
-   languages:
-     - python
-     - bash
-   ```
-
-3. **Install pre-commit hooks:**
-
-   ```bash
-   make install-hooks
-   ```
-
-## Usage
-
-All project tasks are managed through the Makefile. Run `make help` to see available targets:
-
-```
-check                Run all checks (lint, format, test, security, docs)
-docs                 Generate documentation
-fix                  Auto-fix formatting issues in-place
-format               Run all formatters
-help                 Show this help
-install-hooks        Install pre-commit and pre-push hooks
-lint                 Run all linters
-scan                 Run full scan (lint + security)
-security             Run security scanners
-test                 Run all tests
+```bash
+# Download and run as root
+sudo bash install.sh
 ```
 
-All tools run inside the [dev-toolchain](https://github.com/devrail-dev/dev-toolchain) container. The only host requirements are **Docker** and **Make**.
+The installer prompts for configuration interactively. For unattended installs:
+
+```bash
+sudo bash install.sh -y
+```
+
+This accepts all defaults (domain: `localhost`, port: `8000`, TLS: off, analytics: on).
+
+## Requirements
+
+- Ubuntu 22.04 or 24.04
+- Root access
+- Internet connectivity (pulls Docker images)
+- Docker is installed automatically if not present
 
 ## Configuration
 
-### `.devrail.yml`
+The installer prompts for:
 
-The `.devrail.yml` file at the project root declares which languages and settings apply to this project. Uncomment the languages you use:
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Domain | `localhost` | Public domain name |
+| Install directory | `/opt/supabase` | Where all files and volumes live |
+| API port | `8000` | Kong API gateway port |
+| TLS mode | `off` | `off`, `letsencrypt-http`, or `dns-cloudflare` |
+| SMTP | disabled | Optional email delivery for auth |
+| Analytics | enabled | Logflare + Vector log collection |
+| Backup retention | 7 days | How long daily backups are kept |
 
-```yaml
-languages:
-  - python       # ruff, bandit, pytest, mypy
-  - bash         # shellcheck, shfmt, bats
-  - terraform    # tflint, terraform fmt, tfsec, checkov, terraform-docs
-  - ansible      # ansible-lint, molecule
+Configuration is saved to `/opt/supabase/.install.conf` and reloaded on subsequent runs.
 
-fail_fast: false   # true = stop at first failure
-log_format: json   # json or human
+## TLS Modes
+
+| Mode | Description | Requirements |
+|------|-------------|--------------|
+| `off` | No TLS. Use when behind an external load balancer or for local dev. | None |
+| `letsencrypt-http` | nginx + certbot with HTTP-01 challenge. | Port 80 and 443 reachable from internet |
+| `dns-cloudflare` | nginx + certbot with DNS-01 via Cloudflare API. | Cloudflare API token with DNS edit permissions |
+
+With TLS enabled, nginx handles termination and routes:
+
+- `/` — Studio dashboard
+- `/rest/v1/`, `/auth/v1/`, `/realtime/v1/`, `/storage/v1/`, `/functions/v1/`, `/pg/`, `/graphql/v1/` — API via Kong
+
+## Idempotency
+
+The script is safe to re-run. On subsequent runs:
+
+- **Secrets are preserved** from the existing `.env` file
+- **JWT tokens** (ANON_KEY, SERVICE_ROLE_KEY) are only regenerated if JWT_SECRET changes
+- **Data volumes** (database, storage) are never deleted
+- **Configuration files** (docker-compose.yml, kong.yml) are regenerated with current settings
+- **TLS certificates** are skipped if already present
+- **Docker Compose** only recreates containers with changed configuration
+
+## Architecture
+
+```
+                    ┌──────────────────────────────────┐
+                    │         nginx (TLS only)          │
+                    │    terminates TLS, routes paths   │
+                    └──────────────┬───────────────────┘
+                                   │
+                    ┌──────────────▼───────────────────┐
+                    │         Kong (port 8000)          │
+Internet ──────────►│    API gateway + key-auth + ACL   │
+                    └──┬──┬──┬──┬──┬──┬──┬──┬─────────┘
+                       │  │  │  │  │  │  │  │
+        ┌──────────────┘  │  │  │  │  │  │  └──────────┐
+        ▼                 ▼  ▼  ▼  ▼  ▼  ▼             ▼
+     Studio           Auth REST RT Store Meta Func   GraphQL
+     (3000)          (9999)(3000)(4000)(5000)(8080)(9000)
+                       │    │    │    │    │
+                       └────┴────┴────┴────┘
+                              ▼
+                    ┌─────────────────────┐
+                    │   PostgreSQL (5432)  │
+                    │   localhost only     │
+                    └─────────────────────┘
 ```
 
-### `.pre-commit-config.yaml`
+Kong is the single externally-facing service. All API routes use key-auth with `anon` and `service_role` consumers. The `/pg/` endpoint (Postgres Meta) is restricted to `service_role` only.
 
-Pre-commit hooks are pre-configured. Language-specific hooks are commented out by default. Uncomment the hooks matching your `.devrail.yml` languages.
+## Files
 
-### `.editorconfig`
+After installation, the directory structure is:
 
-Formatting rules (indent style, line endings, trailing whitespace) are defined in `.editorconfig`. All editors and AI agents must respect these settings.
+```
+/opt/supabase/
+├── .env                    # Secrets (chmod 600)
+├── .install.conf           # Saved configuration (chmod 600)
+├── docker-compose.yml      # Generated service definitions
+├── backups/                # Daily pg_dump backups (gzipped)
+└── volumes/
+    ├── api/
+    │   └── kong.yml        # Kong declarative config (API keys embedded)
+    ├── db/
+    │   └── init/           # Database initialization scripts
+    ├── functions/
+    │   └── hello/          # Example edge function
+    │       └── index.ts
+    ├── logs/
+    │   └── vector.yml      # Log collection config (if analytics enabled)
+    └── storage/            # File storage data
+```
 
-## Contributing
+## Backups
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for the complete development standards. To add a new language ecosystem to DevRail, see the [Contributing to DevRail](https://github.com/devrail-dev/devrail-standards/blob/main/standards/contributing.md) guide.
+A cron job at `/etc/cron.d/supabase-backup` runs daily at 02:00:
 
-This section covers:
+- `pg_dump` of the `postgres` database, gzipped
+- Stored in `/opt/supabase/backups/`
+- Retention configurable (default: 7 days)
 
-- Critical rules for all contributors
-- Makefile contract and target descriptions
-- Conventional commit format
-- Per-language tool references
-
-## Retrofit Existing Project
-
-To add DevRail standards to an existing GitLab repository, follow the steps below. The order matters because some files reference others.
-
-**Prerequisites:** Docker and Make must be installed on the host. Verify Docker access with `docker pull ghcr.io/devrail-dev/dev-toolchain:v1`.
-
-### Step 1: Core Configuration
-
-Copy the foundation files that all other DevRail components depend on.
-
-- [ ] Copy `.devrail.yml` and uncomment your project's languages
-- [ ] Copy `.editorconfig`
-- [ ] Merge `.gitignore` patterns into your existing `.gitignore` (do not overwrite)
-- [ ] Copy `Makefile` (or merge DevRail targets if you have an existing Makefile)
-
-### Step 2: Pre-Commit Hooks
-
-Set up local enforcement for commit standards and secret detection.
-
-- [ ] Copy `.pre-commit-config.yaml` and uncomment hooks matching your `.devrail.yml` languages
-- [ ] Run `make install-hooks`
-
-### Step 3: Agent Instruction Files
-
-Add AI agent integration so any tool used on the project knows the standards.
-
-- [ ] Copy `DEVELOPMENT.md`, `CLAUDE.md`, `AGENTS.md`, `.cursorrules`
-- [ ] Create `.opencode/` directory and copy `.opencode/agents.yaml`
-
-### Step 4: CI Pipeline
-
-Set up remote enforcement to validate every push and merge request.
-
-- [ ] Copy `.gitlab-ci.yml`
-- [ ] Enable "Pipelines must succeed" in Settings > General > Merge requests
-
-### Step 5: Project Documentation
-
-Add MR template, code ownership, and changelog.
-
-- [ ] Copy `.gitlab/merge_request_templates/default.md` (create directories first)
-- [ ] Copy `.gitlab/CODEOWNERS` and configure ownership patterns for your team
-- [ ] Copy `CHANGELOG.md` if not already present
-
-### Step 6: Verify
-
-Confirm everything works end-to-end.
-
-- [ ] Run `make check` and fix any issues
-- [ ] Create a test commit to verify pre-commit hooks fire
-- [ ] Create a test MR to verify the CI pipeline runs
-
-### Troubleshooting
-
-**Container pull failure:** Ensure Docker is running and can pull from `ghcr.io`. Test with:
+To restore from a backup:
 
 ```bash
-docker pull ghcr.io/devrail-dev/dev-toolchain:v1
+gunzip -c /opt/supabase/backups/supabase-YYYYMMDD-HHMMSS.sql.gz \
+  | PGPASSWORD='<password>' psql -h 127.0.0.1 -U supabase_admin -d postgres
 ```
 
-**Pre-commit install failure:** Ensure `pre-commit` is installed on the host. Install via `pip install pre-commit` or `brew install pre-commit`.
+## Post-Install
 
-**Makefile conflicts:** If the project has an existing Makefile, merge the DevRail targets into it. The DevRail Makefile structure (variables, `.PHONY`, public targets, internal targets) can coexist with project-specific targets.
+After installation, the summary displays:
 
-**.gitignore conflicts:** Do not overwrite the existing `.gitignore`. Merge the DevRail patterns (OS files, editor files, language artifacts, `.devrail-output/`, secrets) into your existing file.
+- Container status
+- Access URLs (API + Studio)
+- API keys (anon + service_role)
+- Dashboard login credentials
+- Database connection details
+- JWT_SECRET (back this up — loss invalidates all keys and sessions)
 
-**CI pipeline not running:** Ensure the GitLab project has CI/CD enabled in Settings > General > Visibility, project features, permissions.
+### Connect with Supabase client libraries
 
-## License
+```javascript
+import { createClient } from '@supabase/supabase-js'
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+const supabase = createClient(
+  'http://your-domain:8000',  // API URL
+  'your-anon-key'             // From install summary
+)
+```
+
+### Add edge functions
+
+Place functions in `/opt/supabase/volumes/functions/`:
+
+```
+volumes/functions/
+├── hello/
+│   └── index.ts
+└── my-function/
+    └── index.ts
+```
+
+Restart the functions container to pick up changes:
+
+```bash
+cd /opt/supabase && docker compose restart functions
+```
+
+### Common operations
+
+```bash
+cd /opt/supabase
+
+# View logs
+docker compose logs -f                    # All services
+docker compose logs -f auth               # Single service
+
+# Restart a service
+docker compose restart auth
+
+# Stop everything
+docker compose down
+
+# Start everything
+docker compose up -d
+
+# Update (edit versions in .install.conf, then re-run)
+sudo bash /path/to/install.sh
+```
+
+## Disaster Recovery
+
+1. **Back up secrets first:** Copy `/opt/supabase/.env` to a secure location. The `JWT_SECRET` is irrecoverable — if lost, all API keys and user sessions are invalidated.
+
+2. **Database:** Restore from the latest backup in `/opt/supabase/backups/`.
+
+3. **Full rebuild:** On a fresh server, copy `.env` and `.install.conf` to `/opt/supabase/`, then run `install.sh -y`. It will regenerate all config files and start services with the preserved secrets.
+
+## Development
+
+All project checks run inside the [dev-toolchain](https://github.com/devrail-dev/dev-toolchain) container. The only host requirements are **Docker** and **Make**.
+
+```bash
+make check          # Run all checks (lint, format, test, security, docs)
+make lint           # ShellCheck
+make format         # shfmt format check
+make help           # See all targets
+```
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the complete DevRail standards reference.
