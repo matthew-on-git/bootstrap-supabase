@@ -79,5 +79,3 @@ sync-to-github:
     - git push github $CI_COMMIT_REF_NAME
   only:
     - main
-  variables:
-    GIT_STRATEGY: clone
