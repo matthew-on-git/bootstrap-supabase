@@ -10,6 +10,7 @@ image: ghcr.io/devrail-dev/dev-toolchain:v1
 
 stages:
   - check
+  - sync
 
 lint:
   stage: check
@@ -70,3 +71,11 @@ docs:
       - .devrail-output/
     expire_in: 1 week
     when: always
+
+sync-to-github:
+  stage: sync
+  script:
+    - git remote add github https://matthew-on-git:${GITHUB_TOKEN}@github.com/matthew-on-git/bootstrap-supabase.git
+    - git push github $CI_COMMIT_REF_NAME
+  only:
+    - main
