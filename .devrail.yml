@@ -3,7 +3,7 @@
 
 languages:
   # - python
-  # - bash
+  - bash
   # - terraform
   # - ansible
   # - ruby
