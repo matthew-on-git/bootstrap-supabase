@@ -420,38 +420,20 @@ log_info "Directory structure created under ${INSTALL_DIR}"
 # DB Init Script
 ######################################################################
 
-cat >"${INSTALL_DIR}/volumes/db/init/99-bootstrap.sh" <<'INITDB'
+cat >"${INSTALL_DIR}/volumes/db/init/zzz-bootstrap.sh" <<'INITDB'
 #!/bin/bash
+# Runs AFTER migrate.sh (sorts z > m in ASCII).
+# The supabase/postgres image already creates roles, schemas, and grants
+# via its own init-scripts/ and migrations/ directories.
+# We only create the analytics database here.
 set -e
 
-psql -v ON_ERROR_STOP=1 --username supabase_admin --dbname postgres <<-'EOSQL'
-  -- Realtime schema
-  CREATE SCHEMA IF NOT EXISTS _realtime;
-  ALTER SCHEMA _realtime OWNER TO supabase_admin;
-
-  -- Realtime publication
-  DO $$
-  BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
-      CREATE PUBLICATION supabase_realtime;
-    END IF;
-  END$$;
-
-  -- API role grants on public schema
-  GRANT USAGE ON SCHEMA public TO anon, service_role;
-  GRANT ALL ON ALL TABLES    IN SCHEMA public TO anon, service_role;
-  GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, service_role;
-  GRANT ALL ON ALL ROUTINES  IN SCHEMA public TO anon, service_role;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO anon, service_role;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, service_role;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES  TO anon, service_role;
-
-  -- Analytics database (harmless if analytics not enabled)
+psql -v ON_ERROR_STOP=1 --no-password --no-psqlrc -U supabase_admin -d postgres <<-'EOSQL'
   SELECT 'CREATE DATABASE _supabase'
     WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '_supabase')\gexec
 EOSQL
 INITDB
-chmod +x "${INSTALL_DIR}/volumes/db/init/99-bootstrap.sh"
+chmod +x "${INSTALL_DIR}/volumes/db/init/zzz-bootstrap.sh"
 log_info "Database init script written"
 
 ######################################################################
@@ -773,7 +755,7 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
-      - ./volumes/db/init/99-bootstrap.sh:/docker-entrypoint-initdb.d/99-bootstrap.sh:ro
+      - ./volumes/db/init/zzz-bootstrap.sh:/docker-entrypoint-initdb.d/zzz-bootstrap.sh:ro
     environment:
       POSTGRES_HOST: /var/run/postgresql
       PGPORT: "5432"
