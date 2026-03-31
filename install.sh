@@ -46,11 +46,14 @@ CONF_FILE=".install.conf"
 readonly RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m'
 readonly BLUE='\033[0;34m' BOLD='\033[1m' NC='\033[0m'
 
-log_info()  { printf "${GREEN}[INFO]${NC}  %s\n" "$*"; }
-log_warn()  { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
+log_info() { printf "${GREEN}[INFO]${NC}  %s\n" "$*"; }
+log_warn() { printf "${YELLOW}[WARN]${NC}  %s\n" "$*"; }
 log_error() { printf "${RED}[ERROR]${NC} %s\n" "$*" >&2; }
-die()       { log_error "$*"; exit 1; }
-banner()    { printf "\n${BOLD}═══ %s ═══${NC}\n\n" "$*"; }
+die() {
+  log_error "$*"
+  exit 1
+}
+banner() { printf "\n${BOLD}═══ %s ═══${NC}\n\n" "$*"; }
 
 ######################################################################
 # Helpers
@@ -89,8 +92,8 @@ prompt_yesno() {
   read -rp "$(printf "${BLUE}>>>${NC} %s [%s]: " "$msg" "$default")" input
   input="${input:-$default}"
   case "${input,,}" in
-    y|yes) printf -v "$var" 'y' ;;
-    *)     printf -v "$var" 'n' ;;
+  y | yes) printf -v "$var" 'y' ;;
+  *) printf -v "$var" 'n' ;;
   esac
 }
 
@@ -102,11 +105,11 @@ generate_jwt() {
   exp=$((iat + 157680000))
   header='{"alg":"HS256","typ":"JWT"}'
   payload="{\"role\":\"${role}\",\"iss\":\"supabase\",\"iat\":${iat},\"exp\":${exp}}"
-  h_b64=$(printf '%s' "$header"  | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+  h_b64=$(printf '%s' "$header" | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
   p_b64=$(printf '%s' "$payload" | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
-  sig=$(printf '%s.%s' "$h_b64" "$p_b64" \
-    | openssl dgst -sha256 -hmac "$secret" -binary \
-    | openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
+  sig=$(printf '%s.%s' "$h_b64" "$p_b64" |
+    openssl dgst -sha256 -hmac "$secret" -binary |
+    openssl base64 -e -A | tr '+/' '-_' | tr -d '=')
   printf '%s.%s.%s' "$h_b64" "$p_b64" "$sig"
 }
 
@@ -118,9 +121,12 @@ AUTO_YES=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -y|--yes) AUTO_YES=true; shift ;;
-    -h|--help)
-      cat <<'USAGE'
+  -y | --yes)
+    AUTO_YES=true
+    shift
+    ;;
+  -h | --help)
+    cat <<'USAGE'
 Usage: install.sh [OPTIONS]
 
 Idempotent installer for self-hosted Supabase (free tier).
@@ -139,9 +145,9 @@ TLS Modes:
   letsencrypt-http   nginx + certbot with HTTP-01. Requires port 80/443.
   dns-cloudflare     nginx + certbot with DNS-01 via Cloudflare API.
 USAGE
-      exit 0
-      ;;
-    *) die "Unknown option: $1" ;;
+    exit 0
+    ;;
+  *) die "Unknown option: $1" ;;
   esac
 done
 
@@ -154,15 +160,15 @@ banner "Pre-flight Checks"
 [[ $EUID -eq 0 ]] || die "This script must be run as root"
 
 if command -v lsb_release &>/dev/null; then
-  [[ "$(lsb_release -is 2>/dev/null)" == "Ubuntu" ]] \
-    || die "This script requires Ubuntu (detected: $(lsb_release -is))"
+  [[ "$(lsb_release -is 2>/dev/null)" == "Ubuntu" ]] ||
+    die "This script requires Ubuntu (detected: $(lsb_release -is))"
 else
   die "lsb_release not found — is this Ubuntu?"
 fi
 
 log_info "Checking internet connectivity..."
-curl -sf --max-time 10 https://hub.docker.com >/dev/null 2>&1 \
-  || die "Cannot reach Docker Hub — check internet connectivity"
+curl -sf --max-time 10 https://hub.docker.com >/dev/null 2>&1 ||
+  die "Cannot reach Docker Hub — check internet connectivity"
 
 log_info "Pre-flight checks passed"
 
@@ -212,9 +218,9 @@ done
 
 banner "Configuration"
 
-prompt DOMAIN      "Domain name"             "$DOMAIN"
-prompt INSTALL_DIR "Install directory"       "$INSTALL_DIR"
-prompt API_PORT    "API gateway port (Kong)" "$API_PORT"
+prompt DOMAIN "Domain name" "$DOMAIN"
+prompt INSTALL_DIR "Install directory" "$INSTALL_DIR"
+prompt API_PORT "API gateway port (Kong)" "$API_PORT"
 
 printf "\n  TLS modes:\n"
 printf "    off               — No TLS. Use behind an external load balancer.\n"
@@ -223,8 +229,8 @@ printf "    dns-cloudflare    — nginx + certbot (DNS-01). No inbound port 80 n
 prompt TLS_MODE "TLS mode" "$TLS_MODE"
 
 case "$TLS_MODE" in
-  off|letsencrypt-http|dns-cloudflare) ;;
-  *) die "Invalid TLS mode: $TLS_MODE" ;;
+off | letsencrypt-http | dns-cloudflare) ;;
+*) die "Invalid TLS mode: $TLS_MODE" ;;
 esac
 
 if [[ "$TLS_MODE" != "off" ]]; then
@@ -241,11 +247,11 @@ printf "\n"
 prompt_yesno CONFIGURE_SMTP "Configure SMTP for auth emails?" "${SMTP_HOST:+y}"
 CONFIGURE_SMTP="${CONFIGURE_SMTP:-n}"
 if [[ "$CONFIGURE_SMTP" == "y" ]]; then
-  prompt        SMTP_HOST   "SMTP host"            "$SMTP_HOST"
-  prompt        SMTP_PORT   "SMTP port"            "$SMTP_PORT"
-  prompt        SMTP_USER   "SMTP username"        "$SMTP_USER"
-  prompt_secret SMTP_PASS   "SMTP password"        "$SMTP_PASS"
-  prompt        SMTP_SENDER "Sender email address"  "$SMTP_SENDER"
+  prompt SMTP_HOST "SMTP host" "$SMTP_HOST"
+  prompt SMTP_PORT "SMTP port" "$SMTP_PORT"
+  prompt SMTP_USER "SMTP username" "$SMTP_USER"
+  prompt_secret SMTP_PASS "SMTP password" "$SMTP_PASS"
+  prompt SMTP_SENDER "Sender email address" "$SMTP_SENDER"
 fi
 
 prompt_yesno ENABLE_ANALYTICS "Enable analytics (Logflare + Vector)?" "$ENABLE_ANALYTICS"
@@ -257,7 +263,7 @@ prompt BACKUP_RETENTION "Backup retention (days)" "$BACKUP_RETENTION"
 
 mkdir -p "$INSTALL_DIR"
 
-cat > "${INSTALL_DIR}/${CONF_FILE}" <<CONF
+cat >"${INSTALL_DIR}/${CONF_FILE}" <<CONF
 # bootstrap-supabase saved configuration — $(date -Iseconds)
 DOMAIN="${DOMAIN}"
 INSTALL_DIR="${INSTALL_DIR}"
@@ -301,21 +307,21 @@ apt_packages=(ca-certificates curl gnupg openssl postgresql-client)
 if ! command -v docker &>/dev/null; then
   log_info "Installing Docker..."
   install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg |
+    gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null
   chmod a+r /etc/apt/keyrings/docker.gpg
   # shellcheck disable=SC2027,SC2046
   echo "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] \
     https://download.docker.com/linux/ubuntu "$(lsb_release -cs)" stable" \
-    > /etc/apt/sources.list.d/docker.list
+    >/etc/apt/sources.list.d/docker.list
   apt_packages+=(docker-ce docker-ce-cli containerd.io docker-compose-plugin)
 fi
 
 if [[ "$TLS_MODE" != "off" ]]; then
   apt_packages+=(nginx certbot)
   case "$TLS_MODE" in
-    letsencrypt-http) apt_packages+=(python3-certbot-nginx) ;;
-    dns-cloudflare)   apt_packages+=(python3-certbot-dns-cloudflare) ;;
+  letsencrypt-http) apt_packages+=(python3-certbot-nginx) ;;
+  dns-cloudflare) apt_packages+=(python3-certbot-dns-cloudflare) ;;
   esac
 fi
 
@@ -354,11 +360,11 @@ preserve_or_generate() {
 }
 
 preserve_or_generate POSTGRES_PASSWORD "openssl rand -hex 32"
-preserve_or_generate JWT_SECRET        "openssl rand -hex 32"
+preserve_or_generate JWT_SECRET "openssl rand -hex 32"
 preserve_or_generate DASHBOARD_PASSWORD "openssl rand -hex 16"
-preserve_or_generate SECRET_KEY_BASE   "openssl rand -base64 48 | tr -d '\n'"
-preserve_or_generate VAULT_ENC_KEY     "openssl rand -hex 16"
-preserve_or_generate LOGFLARE_API_KEY  "openssl rand -hex 16"
+preserve_or_generate SECRET_KEY_BASE "openssl rand -base64 48 | tr -d '\n'"
+preserve_or_generate VAULT_ENC_KEY "openssl rand -hex 16"
+preserve_or_generate LOGFLARE_API_KEY "openssl rand -hex 16"
 
 # JWT tokens are derived from JWT_SECRET — only regenerate when it changes
 EXISTING_JWT=""
@@ -414,7 +420,7 @@ log_info "Directory structure created under ${INSTALL_DIR}"
 # DB Init Script
 ######################################################################
 
-cat > "${INSTALL_DIR}/volumes/db/init/99-bootstrap.sh" <<'INITDB'
+cat >"${INSTALL_DIR}/volumes/db/init/99-bootstrap.sh" <<'INITDB'
 #!/bin/bash
 set -e
 
@@ -452,7 +458,7 @@ log_info "Database init script written"
 # Kong Declarative Config
 ######################################################################
 
-cat > "${INSTALL_DIR}/volumes/api/kong.yml" <<KONG
+cat >"${INSTALL_DIR}/volumes/api/kong.yml" <<KONG
 _format_version: "2.1"
 _transform: true
 
@@ -611,7 +617,7 @@ log_info "Kong API gateway config written"
 ######################################################################
 
 if [[ "$ENABLE_ANALYTICS" == "y" ]]; then
-  cat > "${INSTALL_DIR}/volumes/logs/vector.yml" <<VECTOR
+  cat >"${INSTALL_DIR}/volumes/logs/vector.yml" <<VECTOR
 api:
   enabled: true
   address: 0.0.0.0:9001
@@ -658,7 +664,7 @@ fi
 # Example Edge Function
 ######################################################################
 
-cat > "${INSTALL_DIR}/volumes/functions/hello/index.ts" <<'EDGEFN'
+cat >"${INSTALL_DIR}/volumes/functions/hello/index.ts" <<'EDGEFN'
 Deno.serve(async (_req: Request) => {
   return new Response(
     JSON.stringify({ message: "Hello from Supabase Edge Functions!" }),
@@ -672,7 +678,7 @@ log_info "Example edge function written"
 # .env (secrets)
 ######################################################################
 
-cat > "$ENV_FILE" <<DOTENV
+cat >"$ENV_FILE" <<DOTENV
 # bootstrap-supabase — generated $(date -Iseconds)
 # Contains secrets — do not commit to version control.
 
@@ -706,7 +712,8 @@ if [[ "$ENABLE_ANALYTICS" == "y" ]]; then
   # Bash does not re-expand variables inside an already-expanded string,
   # so the \$ in this assignment produces a literal $ in the variable value,
   # which then passes through the outer heredoc untouched.
-  ANALYTICS_BLOCK=$(cat <<ANALYTICS_EOF
+  ANALYTICS_BLOCK=$(
+    cat <<ANALYTICS_EOF
 
   # ── Analytics (Logflare) ───────────────────────────────────────
   analytics:
@@ -752,7 +759,7 @@ ANALYTICS_EOF
   )
 fi
 
-cat > "${INSTALL_DIR}/docker-compose.yml" <<COMPOSE
+cat >"${INSTALL_DIR}/docker-compose.yml" <<COMPOSE
 # bootstrap-supabase — generated $(date -Iseconds)
 # Re-run install.sh to regenerate. Data volumes are preserved.
 
@@ -1032,7 +1039,7 @@ if [[ "$TLS_MODE" != "off" ]]; then
 
   if [[ "$TLS_MODE" == "dns-cloudflare" ]]; then
     mkdir -p /etc/letsencrypt
-    cat > /etc/letsencrypt/.cloudflare-credentials <<CFCRED
+    cat >/etc/letsencrypt/.cloudflare-credentials <<CFCRED
 dns_cloudflare_api_token = ${CF_API_TOKEN}
 CFCRED
     chmod 600 /etc/letsencrypt/.cloudflare-credentials
@@ -1043,8 +1050,8 @@ CFCRED
   if [[ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
     log_info "Obtaining TLS certificate for ${DOMAIN}..."
     case "$TLS_MODE" in
-      letsencrypt-http)
-        cat > /etc/nginx/sites-available/supabase <<TMPNGINX
+    letsencrypt-http)
+      cat >/etc/nginx/sites-available/supabase <<TMPNGINX
 server {
     listen 80;
     server_name ${DOMAIN};
@@ -1052,19 +1059,19 @@ server {
     location / { return 444; }
 }
 TMPNGINX
-        ln -sf /etc/nginx/sites-available/supabase /etc/nginx/sites-enabled/supabase
-        rm -f /etc/nginx/sites-enabled/default
-        systemctl reload nginx
-        certbot certonly --nginx -d "$DOMAIN" \
-          --non-interactive --agree-tos -m "$CERTBOT_EMAIL"
-        ;;
-      dns-cloudflare)
-        certbot certonly \
-          --dns-cloudflare \
-          --dns-cloudflare-credentials /etc/letsencrypt/.cloudflare-credentials \
-          -d "$DOMAIN" \
-          --non-interactive --agree-tos -m "$CERTBOT_EMAIL"
-        ;;
+      ln -sf /etc/nginx/sites-available/supabase /etc/nginx/sites-enabled/supabase
+      rm -f /etc/nginx/sites-enabled/default
+      systemctl reload nginx
+      certbot certonly --nginx -d "$DOMAIN" \
+        --non-interactive --agree-tos -m "$CERTBOT_EMAIL"
+      ;;
+    dns-cloudflare)
+      certbot certonly \
+        --dns-cloudflare \
+        --dns-cloudflare-credentials /etc/letsencrypt/.cloudflare-credentials \
+        -d "$DOMAIN" \
+        --non-interactive --agree-tos -m "$CERTBOT_EMAIL"
+      ;;
     esac
     log_info "TLS certificate obtained"
   else
@@ -1072,7 +1079,7 @@ TMPNGINX
   fi
 
   # Production nginx config
-  cat > /etc/nginx/sites-available/supabase <<NGINX
+  cat >/etc/nginx/sites-available/supabase <<NGINX
 # Supabase reverse proxy — generated by bootstrap-supabase
 
 upstream kong_upstream   { server 127.0.0.1:${API_PORT}; }
@@ -1162,7 +1169,7 @@ done
 
 banner "Configuring Backups"
 
-cat > /etc/cron.d/supabase-backup <<CRON
+cat >/etc/cron.d/supabase-backup <<CRON
 # Daily Supabase database backup at 02:00
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -1177,12 +1184,12 @@ log_info "Daily backup cron installed (retention: ${BACKUP_RETENTION} days)"
 
 banner "Installation Complete"
 
-printf "${BOLD}Container Status:${NC}\n"
+printf '%s\n' "${BOLD}Container Status:${NC}"
 docker compose -f "${INSTALL_DIR}/docker-compose.yml" ps \
-  --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null \
-  || docker compose -f "${INSTALL_DIR}/docker-compose.yml" ps
+  --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null ||
+  docker compose -f "${INSTALL_DIR}/docker-compose.yml" ps
 
-printf "\n${BOLD}Access URLs:${NC}\n"
+printf '\n%s\n' "${BOLD}Access URLs:${NC}"
 if [[ "$TLS_MODE" == "off" ]]; then
   printf "  Studio:     http://%s:3000\n" "$DOMAIN"
   printf "  API:        http://%s:%s\n" "$DOMAIN" "$API_PORT"
@@ -1191,20 +1198,20 @@ else
   printf "  API:        https://%s\n" "$DOMAIN"
 fi
 
-printf "\n${BOLD}API Keys:${NC}\n"
+printf '\n%s\n' "${BOLD}API Keys:${NC}"
 printf "  anon (public):     %s\n" "$ANON_KEY"
 printf "  service_role:      %s\n" "$SERVICE_ROLE_KEY"
 
-printf "\n${BOLD}Dashboard Login:${NC}\n"
+printf '\n%s\n' "${BOLD}Dashboard Login:${NC}"
 printf "  Username:  supabase\n"
 printf "  Password:  %s\n" "$DASHBOARD_PASSWORD"
 
-printf "\n${BOLD}Database:${NC}\n"
+printf '\n%s\n' "${BOLD}Database:${NC}"
 printf "  Host:      127.0.0.1:5432\n"
 printf "  User:      supabase_admin\n"
 printf "  Password:  %s\n" "$POSTGRES_PASSWORD"
 
-printf "\n${BOLD}Files:${NC}\n"
+printf '\n%s\n' "${BOLD}Files:${NC}"
 printf "  Install dir:     %s\n" "$INSTALL_DIR"
 printf "  Docker Compose:  %s/docker-compose.yml\n" "$INSTALL_DIR"
 printf "  Environment:     %s/.env\n" "$INSTALL_DIR"
@@ -1212,13 +1219,13 @@ printf "  Kong config:     %s/volumes/api/kong.yml\n" "$INSTALL_DIR"
 printf "  Edge functions:  %s/volumes/functions/\n" "$INSTALL_DIR"
 printf "  Backups:         %s/backups/\n" "$INSTALL_DIR"
 
-printf "\n"
-printf "${RED}${BOLD}╔════════════════════════════════════════════════════════════════╗${NC}\n"
-printf "${RED}${BOLD}║  BACK UP YOUR JWT_SECRET — IT CANNOT BE RECOVERED             ║${NC}\n"
+printf '\n'
+printf '%s\n' "${RED}${BOLD}╔════════════════════════════════════════════════════════════════╗${NC}"
+printf '%s\n' "${RED}${BOLD}║  BACK UP YOUR JWT_SECRET — IT CANNOT BE RECOVERED             ║${NC}"
 printf "${RED}${BOLD}║  %-60s  ║${NC}\n" "$JWT_SECRET"
-printf "${RED}${BOLD}║                                                                ║${NC}\n"
-printf "${RED}${BOLD}║  Losing this key invalidates ALL API keys and user sessions.   ║${NC}\n"
-printf "${RED}${BOLD}╚════════════════════════════════════════════════════════════════╝${NC}\n"
-printf "\n"
+printf '%s\n' "${RED}${BOLD}║                                                                ║${NC}"
+printf '%s\n' "${RED}${BOLD}║  Losing this key invalidates ALL API keys and user sessions.   ║${NC}"
+printf '%s\n' "${RED}${BOLD}╚════════════════════════════════════════════════════════════════╝${NC}"
+printf '\n'
 
 log_info "Supabase self-hosted is ready."
