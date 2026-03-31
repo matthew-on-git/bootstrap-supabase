@@ -74,6 +74,8 @@ docs:
 
 sync-to-github:
   stage: sync
+  variables:
+    GIT_DEPTH: 0
   script:
     - git remote add github https://matthew-on-git:${GITHUB_TOKEN}@github.com/matthew-on-git/bootstrap-supabase.git
     - git push github HEAD:refs/heads/$CI_COMMIT_REF_NAME
