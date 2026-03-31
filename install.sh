@@ -439,11 +439,23 @@ chmod +x "${INSTALL_DIR}/volumes/db/init/zzz-bootstrap.sh"
 # after running all migrations. This sets service account passwords to match
 # POSTGRES_PASSWORD so GoTrue, Storage, etc. can authenticate.
 cat >"${INSTALL_DIR}/volumes/db/postgresql.schema.sql" <<PWSQL
-ALTER ROLE supabase_auth_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
-ALTER ROLE supabase_storage_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
-ALTER ROLE supabase_functions_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
-ALTER ROLE authenticator WITH PASSWORD '${POSTGRES_PASSWORD}';
-ALTER ROLE supabase_read_only_user WITH PASSWORD '${POSTGRES_PASSWORD}';
+DO \$\$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN
+    SELECT rolname FROM pg_roles
+    WHERE rolname IN (
+      'supabase_auth_admin',
+      'supabase_storage_admin',
+      'supabase_functions_admin',
+      'authenticator',
+      'supabase_read_only_user'
+    )
+  LOOP
+    EXECUTE format('ALTER ROLE %I WITH PASSWORD %L', r.rolname, '${POSTGRES_PASSWORD}');
+  END LOOP;
+END
+\$\$;
 PWSQL
 chmod 644 "${INSTALL_DIR}/volumes/db/postgresql.schema.sql"
 
