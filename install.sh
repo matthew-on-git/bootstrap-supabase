@@ -445,7 +445,7 @@ ALTER ROLE supabase_functions_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
 ALTER ROLE authenticator WITH PASSWORD '${POSTGRES_PASSWORD}';
 ALTER ROLE supabase_read_only_user WITH PASSWORD '${POSTGRES_PASSWORD}';
 PWSQL
-chmod 600 "${INSTALL_DIR}/volumes/db/postgresql.schema.sql"
+chmod 644 "${INSTALL_DIR}/volumes/db/postgresql.schema.sql"
 
 log_info "Database init scripts written"
 
