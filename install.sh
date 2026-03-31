@@ -434,7 +434,20 @@ psql -v ON_ERROR_STOP=1 --no-password --no-psqlrc -U supabase_admin -d postgres 
 EOSQL
 INITDB
 chmod +x "${INSTALL_DIR}/volumes/db/init/zzz-bootstrap.sh"
-log_info "Database init script written"
+
+# Post-init password script — migrate.sh sources /etc/postgresql.schema.sql
+# after running all migrations. This sets service account passwords to match
+# POSTGRES_PASSWORD so GoTrue, Storage, etc. can authenticate.
+cat >"${INSTALL_DIR}/volumes/db/postgresql.schema.sql" <<PWSQL
+ALTER ROLE supabase_auth_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
+ALTER ROLE supabase_storage_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
+ALTER ROLE supabase_functions_admin WITH PASSWORD '${POSTGRES_PASSWORD}';
+ALTER ROLE authenticator WITH PASSWORD '${POSTGRES_PASSWORD}';
+ALTER ROLE supabase_read_only_user WITH PASSWORD '${POSTGRES_PASSWORD}';
+PWSQL
+chmod 600 "${INSTALL_DIR}/volumes/db/postgresql.schema.sql"
+
+log_info "Database init scripts written"
 
 ######################################################################
 # Kong Declarative Config
@@ -756,6 +769,7 @@ services:
     volumes:
       - db-data:/var/lib/postgresql/data
       - ./volumes/db/init/zzz-bootstrap.sh:/docker-entrypoint-initdb.d/zzz-bootstrap.sh:ro
+      - ./volumes/db/postgresql.schema.sql:/etc/postgresql.schema.sql:ro
     environment:
       POSTGRES_HOST: /var/run/postgresql
       PGPORT: "5432"
