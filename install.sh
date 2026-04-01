@@ -365,6 +365,8 @@ preserve_or_generate DASHBOARD_PASSWORD "openssl rand -hex 16"
 preserve_or_generate SECRET_KEY_BASE "openssl rand -base64 48 | tr -d '\n'"
 preserve_or_generate VAULT_ENC_KEY "openssl rand -hex 16"
 preserve_or_generate LOGFLARE_API_KEY "openssl rand -hex 16"
+preserve_or_generate S3_ACCESS_KEY "openssl rand -hex 16"
+preserve_or_generate S3_SECRET_KEY "openssl rand -hex 32"
 
 # JWT tokens are derived from JWT_SECRET — only regenerate when it changes
 EXISTING_JWT=""
@@ -671,15 +673,38 @@ fi
 # Example Edge Function
 ######################################################################
 
+mkdir -p "${INSTALL_DIR}/volumes/functions/main" "${INSTALL_DIR}/volumes/functions/hello"
+
+# Main service — the edge-runtime entry point that routes to individual functions
+cat >"${INSTALL_DIR}/volumes/functions/main/index.ts" <<'MAINFN'
+import { serve } from "https://deno.land/std@0.131.0/http/server.ts";
+
+serve(async (req: Request) => {
+  const url = new URL(req.url);
+  const pathParts = url.pathname.split("/").filter(Boolean);
+  const functionName = pathParts[0] || "hello";
+
+  try {
+    const handler = await import(`../${functionName}/index.ts`);
+    return handler.default(req);
+  } catch {
+    return new Response(
+      JSON.stringify({ error: `Function '${functionName}' not found` }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    );
+  }
+});
+MAINFN
+
 cat >"${INSTALL_DIR}/volumes/functions/hello/index.ts" <<'EDGEFN'
-Deno.serve(async (_req: Request) => {
+export default async (_req: Request) => {
   return new Response(
     JSON.stringify({ message: "Hello from Supabase Edge Functions!" }),
     { headers: { "Content-Type": "application/json" } },
   );
-});
+};
 EDGEFN
-log_info "Example edge function written"
+log_info "Edge functions written"
 
 ######################################################################
 # .env (secrets)
@@ -697,6 +722,8 @@ DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD}
 SECRET_KEY_BASE=${SECRET_KEY_BASE}
 VAULT_ENC_KEY=${VAULT_ENC_KEY}
 LOGFLARE_API_KEY=${LOGFLARE_API_KEY}
+S3_ACCESS_KEY=${S3_ACCESS_KEY}
+S3_SECRET_KEY=${S3_SECRET_KEY}
 SMTP_HOST=${SMTP_HOST}
 SMTP_PORT=${SMTP_PORT}
 SMTP_USER=${SMTP_USER}
@@ -738,15 +765,17 @@ if [[ "$ENABLE_ANALYTICS" == "y" ]]; then
       DB_PORT: "5432"
       DB_PASSWORD: \${POSTGRES_PASSWORD}
       DB_SCHEMA: _analytics
-      LOGFLARE_API_KEY: \${LOGFLARE_API_KEY}
+      LOGFLARE_PUBLIC_ACCESS_TOKEN: \${LOGFLARE_API_KEY}
+      LOGFLARE_PRIVATE_ACCESS_TOKEN: \${LOGFLARE_API_KEY}
       LOGFLARE_SINGLE_TENANT: "true"
       LOGFLARE_SUPABASE_MODE: "true"
-      LOGFLARE_MIN_CLUSTER_SIZE: "1"
-      RELEASE_COOKIE: cookie
+      POSTGRES_BACKEND_URL: postgresql://supabase_admin:\${POSTGRES_PASSWORD}@db:5432/_supabase
+      POSTGRES_BACKEND_SCHEMA: _analytics
+      LOGFLARE_FEATURE_FLAG_OVERRIDE: multibackend=true
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:4000/health"]
-      interval: 10s
       timeout: 5s
+      interval: 5s
       retries: 10
 
   # ── Log Collection (Vector) ────────────────────────────────────
@@ -887,7 +916,7 @@ services:
   # ── Realtime ───────────────────────────────────────────────────
   realtime:
     image: supabase/realtime:${VER_REALTIME}
-    container_name: supabase-realtime
+    container_name: realtime-dev.supabase-realtime
     restart: unless-stopped
     depends_on:
       db:
@@ -903,16 +932,19 @@ services:
       DB_ENC_KEY: supabaserealtime
       API_JWT_SECRET: \${JWT_SECRET}
       SECRET_KEY_BASE: \${SECRET_KEY_BASE}
-      FLY_ALLOC_ID: fly123
-      FLY_APP_NAME: realtime
+      METRICS_JWT_SECRET: \${JWT_SECRET}
       ERL_AFLAGS: -proto_dist inet_tcp
-      ENABLE_TAILSCALE: "false"
       DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
     healthcheck:
-      test: ["CMD", "bash", "-c", "printf '\\\\0' > /dev/tcp/localhost/4000"]
-      interval: 10s
+      test: ["CMD-SHELL", "curl -sSfL --head -o /dev/null -H 'Authorization: Bearer ${ANON_KEY}' http://localhost:4000/api/tenants/realtime-dev/health"]
       timeout: 5s
-      retries: 5
+      interval: 30s
+      retries: 3
+      start_period: 10s
 
   # ── Storage API ────────────────────────────────────────────────
   storage:
@@ -932,8 +964,10 @@ services:
       ANON_KEY: \${ANON_KEY}
       SERVICE_KEY: \${SERVICE_ROLE_KEY}
       POSTGREST_URL: http://rest:3000
-      PGRST_JWT_SECRET: \${JWT_SECRET}
+      AUTH_JWT_SECRET: \${JWT_SECRET}
       DATABASE_URL: postgres://supabase_storage_admin:\${POSTGRES_PASSWORD}@db:5432/postgres
+      STORAGE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
       FILE_SIZE_LIMIT: "52428800"
       STORAGE_BACKEND: file
       FILE_STORAGE_BACKEND_PATH: /var/lib/storage
@@ -942,11 +976,14 @@ services:
       GLOBAL_S3_BUCKET: stub
       ENABLE_IMAGE_TRANSFORMATION: "true"
       IMGPROXY_URL: http://imgproxy:5001
+      S3_PROTOCOL_ACCESS_KEY_ID: \${S3_ACCESS_KEY}
+      S3_PROTOCOL_ACCESS_KEY_SECRET: \${S3_SECRET_KEY}
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5000/status"]
-      interval: 10s
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://storage:5000/status"]
       timeout: 5s
-      retries: 5
+      interval: 5s
+      retries: 3
+      start_period: 10s
 
   # ── Image Transformations ──────────────────────────────────────
   imgproxy:
@@ -991,14 +1028,17 @@ services:
       kong:
         condition: service_started
     volumes:
-      - ./volumes/functions:/home/deno/functions:ro
+      - ./volumes/functions:/home/deno/functions:Z
+      - deno-cache:/root/.cache/deno
     environment:
       JWT_SECRET: \${JWT_SECRET}
       SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       SUPABASE_ANON_KEY: \${ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: \${SERVICE_ROLE_KEY}
       SUPABASE_DB_URL: postgresql://postgres:\${POSTGRES_PASSWORD}@db:5432/postgres
-      VERIFY_JWT: "true"
+      VERIFY_JWT: "false"
+    command: ["start", "--main-service", "/home/deno/functions/main"]
 
   # ── Studio Dashboard ──────────────────────────────────────────
   studio:
@@ -1034,6 +1074,7 @@ ${ANALYTICS_BLOCK}
 volumes:
   db-data:
   storage-data:
+  deno-cache:
 COMPOSE
 
 log_info "docker-compose.yml written ($(grep -c 'image:' "${INSTALL_DIR}/docker-compose.yml") services)"
