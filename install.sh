@@ -431,8 +431,19 @@ cat >"${INSTALL_DIR}/volumes/db/init/zzz-bootstrap.sh" <<'INITDB'
 set -e
 
 psql -v ON_ERROR_STOP=1 --no-password --no-psqlrc -U supabase_admin -d postgres <<-'EOSQL'
+  -- Schema for Realtime migrations (must exist before Realtime starts)
+  CREATE SCHEMA IF NOT EXISTS _realtime;
+  ALTER SCHEMA _realtime OWNER TO supabase_admin;
+
+  -- Analytics database
   SELECT 'CREATE DATABASE _supabase'
     WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '_supabase')\gexec
+EOSQL
+
+# Create _analytics schema in the _supabase database (for Logflare)
+psql -v ON_ERROR_STOP=1 --no-password --no-psqlrc -U supabase_admin -d _supabase <<-'EOSQL'
+  CREATE SCHEMA IF NOT EXISTS _analytics;
+  ALTER SCHEMA _analytics OWNER TO supabase_admin;
 EOSQL
 INITDB
 chmod +x "${INSTALL_DIR}/volumes/db/init/zzz-bootstrap.sh"
