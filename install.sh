@@ -787,7 +787,8 @@ if [[ "$ENABLE_ANALYTICS" == "y" ]]; then
       test: ["CMD", "curl", "-sf", "http://localhost:4000/health"]
       timeout: 5s
       interval: 5s
-      retries: 10
+      retries: 5
+      start_period: 120s
 
   # ── Log Collection (Vector) ────────────────────────────────────
   vector:
@@ -837,6 +838,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 90s
     command:
       - postgres
       - -c
@@ -904,7 +906,8 @@ services:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 3
+      start_period: 60s
 
   # ── REST API (PostgREST) ──────────────────────────────────────
   rest:
@@ -1208,16 +1211,29 @@ log_info "Pulling container images (this may take a few minutes)..."
 docker compose pull
 
 log_info "Starting services..."
-docker compose up -d
-
-log_info "Waiting for API gateway..."
-for attempt in $(seq 1 60); do
-  if curl -sf "http://127.0.0.1:${API_PORT}/" >/dev/null 2>&1; then
-    log_info "API gateway is healthy (attempt ${attempt}/60)"
+# On first run, migrations can take 1-2 minutes on slower hardware.
+# If compose exits because a health check times out, retry — the slow
+# services will have finished initializing by then.
+for run in 1 2 3; do
+  if docker compose up -d 2>&1; then
     break
   fi
-  if [[ $attempt -eq 60 ]]; then
-    log_warn "API gateway did not respond within 60s"
+  if [[ $run -lt 3 ]]; then
+    log_warn "Some services still starting — retrying in 15s (attempt ${run}/3)..."
+    sleep 15
+  else
+    log_warn "Services may still be starting. Run: docker compose up -d"
+  fi
+done
+
+log_info "Waiting for API gateway..."
+for attempt in $(seq 1 120); do
+  if curl -sf "http://127.0.0.1:${API_PORT}/" >/dev/null 2>&1; then
+    log_info "API gateway is healthy (attempt ${attempt}/120)"
+    break
+  fi
+  if [[ $attempt -eq 120 ]]; then
+    log_warn "API gateway did not respond within 120s"
     log_warn "Check: docker compose -f ${INSTALL_DIR}/docker-compose.yml logs"
   fi
   sleep 1
