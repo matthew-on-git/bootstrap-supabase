@@ -8,6 +8,9 @@
 
 image: ghcr.io/devrail-dev/dev-toolchain:v1
 
+variables:
+  GIT_DEPTH: 20
+
 stages:
   - check
   - sync
