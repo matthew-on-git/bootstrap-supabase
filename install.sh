@@ -1083,9 +1083,10 @@ services:
       LOGFLARE_API_KEY: \${LOGFLARE_API_KEY}
       LOGFLARE_URL: http://analytics:4000
       NEXT_PUBLIC_ENABLE_LOGS: "true"
+      HOSTNAME: "0.0.0.0"  # Next.js 16 binds to container hostname by default; force all-interfaces for health checks and Docker port mapping
       NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/platform/health').then(r=>{if(r.status!==200)throw r.status})"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>{if(r.status!==200)throw r.status})"]
       interval: 10s
       timeout: 5s
       retries: 5
