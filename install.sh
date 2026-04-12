@@ -867,7 +867,7 @@ services:
       auth:
         condition: service_healthy
       rest:
-        condition: service_started
+        condition: service_healthy
 
   # ── Auth (GoTrue) ─────────────────────────────────────────────
   auth:
@@ -926,6 +926,12 @@ services:
       PGRST_APP_SETTINGS_JWT_SECRET: \${JWT_SECRET}
       PGRST_APP_SETTINGS_JWT_EXP: "3600"
       PGRST_DB_MAX_ROWS: "1000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/ready || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # ── Realtime ───────────────────────────────────────────────────
   realtime:
@@ -1040,7 +1046,7 @@ services:
     restart: unless-stopped
     depends_on:
       kong:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./volumes/functions:/home/deno/functions:Z
       - deno-cache:/root/.cache/deno
@@ -1061,7 +1067,7 @@ services:
     restart: unless-stopped
     depends_on:
       kong:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${KONG_BIND}:3000:3000"
     environment:
@@ -1083,6 +1089,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 ${ANALYTICS_BLOCK}
 
 volumes:
