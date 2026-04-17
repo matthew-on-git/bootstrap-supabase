@@ -867,7 +867,7 @@ services:
       auth:
         condition: service_healthy
       rest:
-        condition: service_started
+        condition: service_healthy
 
   # ── Auth (GoTrue) ─────────────────────────────────────────────
   auth:
@@ -926,6 +926,12 @@ services:
       PGRST_APP_SETTINGS_JWT_SECRET: \${JWT_SECRET}
       PGRST_APP_SETTINGS_JWT_EXP: "3600"
       PGRST_DB_MAX_ROWS: "1000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/ready || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # ── Realtime ───────────────────────────────────────────────────
   realtime:
@@ -1040,7 +1046,7 @@ services:
     restart: unless-stopped
     depends_on:
       kong:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./volumes/functions:/home/deno/functions:Z
       - deno-cache:/root/.cache/deno
@@ -1061,7 +1067,7 @@ services:
     restart: unless-stopped
     depends_on:
       kong:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${KONG_BIND}:3000:3000"
     environment:
@@ -1077,12 +1083,14 @@ services:
       LOGFLARE_API_KEY: \${LOGFLARE_API_KEY}
       LOGFLARE_URL: http://analytics:4000
       NEXT_PUBLIC_ENABLE_LOGS: "true"
+      HOSTNAME: "0.0.0.0"  # Next.js 16 binds to container hostname by default; force all-interfaces for health checks and Docker port mapping
       NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/platform/health').then(r=>{if(r.status!==200)throw r.status})"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>{if(r.status!==200)throw r.status})"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 ${ANALYTICS_BLOCK}
 
 volumes:
@@ -1159,8 +1167,22 @@ server {
 
     client_max_body_size 100m;
 
-    # API routes → Kong
-    location ~ ^/(rest|auth|realtime|storage|pg|graphql|functions|analytics)/v1(/|\$) {
+    # API routes → Kong (versioned endpoints)
+    location ~ ^/(rest|auth|realtime|storage|graphql|functions|analytics)/v1(/|\$) {
+        proxy_pass          http://kong_upstream;
+        proxy_set_header    Host \$host;
+        proxy_set_header    X-Real-IP \$remote_addr;
+        proxy_set_header    X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header    X-Forwarded-Proto \$scheme;
+        proxy_http_version  1.1;
+        proxy_set_header    Upgrade \$http_upgrade;
+        proxy_set_header    Connection "upgrade";
+        proxy_read_timeout  86400;
+    }
+
+    # Meta (postgres-meta) routes → Kong
+    # Meta API uses /pg/ prefix WITHOUT /v1 — separate location block required
+    location ~ ^/pg(/|\$) {
         proxy_pass          http://kong_upstream;
         proxy_set_header    Host \$host;
         proxy_set_header    X-Real-IP \$remote_addr;
