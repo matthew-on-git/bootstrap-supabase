@@ -1065,11 +1065,20 @@ services:
     depends_on:
       kong:
         condition: service_healthy
+      meta:
+        condition: service_started
     ports:
       - "${KONG_BIND}:3000:3000"
     environment:
-      STUDIO_DEFAULT_ORGANIZATION: Default Organization
-      STUDIO_DEFAULT_PROJECT: Default Project
+      # Studio-expected env var names (not STUDIO_DEFAULT_*) — the official
+      # Supabase docker-compose maps STUDIO_DEFAULT_* from .env onto these.
+      DEFAULT_ORGANIZATION_NAME: Default Organization
+      DEFAULT_PROJECT_NAME: Default Project
+      # Studio reaches postgres-meta DIRECTLY for schema/table introspection,
+      # not through Kong. Omitting this makes Studio default to localhost:8000
+      # and crash with ECONNREFUSED when loading the database dashboard.
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
       SUPABASE_URL: http://kong:8000
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       SUPABASE_ANON_KEY: \${ANON_KEY}
@@ -1246,13 +1255,18 @@ for run in 1 2 3; do
 done
 
 log_info "Waiting for API gateway..."
+# Hit /rest/v1/ — a route Kong actually has. Expect 401 (Kong's auth plugin
+# rejecting a missing API key), which proves Kong is up AND the PostgREST
+# route is wired. Curling / returns Kong's 404 even when everything is fine.
 for attempt in $(seq 1 120); do
-  if curl -sf "http://127.0.0.1:${API_PORT}/" >/dev/null 2>&1; then
+  status=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" \
+    "http://127.0.0.1:${API_PORT}/rest/v1/" 2>/dev/null || echo "000")
+  if [[ "$status" == "401" ]]; then
     log_info "API gateway is healthy (attempt ${attempt}/120)"
     break
   fi
   if [[ $attempt -eq 120 ]]; then
-    log_warn "API gateway did not respond within 120s"
+    log_warn "API gateway did not respond within 120s (last status: ${status})"
     log_warn "Check: docker compose -f ${INSTALL_DIR}/docker-compose.yml logs"
   fi
   sleep 1
