@@ -867,7 +867,7 @@ services:
       auth:
         condition: service_healthy
       rest:
-        condition: service_healthy
+        condition: service_started
 
   # ── Auth (GoTrue) ─────────────────────────────────────────────
   auth:
@@ -926,12 +926,9 @@ services:
       PGRST_APP_SETTINGS_JWT_SECRET: \${JWT_SECRET}
       PGRST_APP_SETTINGS_JWT_EXP: "3600"
       PGRST_DB_MAX_ROWS: "1000"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:3000/ready || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+    # No healthcheck: postgrest/postgrest image is distroless (no shell, no
+    # curl, no wget), so CMD-SHELL cannot be executed. Consumers must rely on
+    # service_started and retry logic or start_period windows instead.
 
   # ── Realtime ───────────────────────────────────────────────────
   realtime:
