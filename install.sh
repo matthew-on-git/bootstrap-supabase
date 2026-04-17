@@ -1065,11 +1065,20 @@ services:
     depends_on:
       kong:
         condition: service_healthy
+      meta:
+        condition: service_started
     ports:
       - "${KONG_BIND}:3000:3000"
     environment:
-      STUDIO_DEFAULT_ORGANIZATION: Default Organization
-      STUDIO_DEFAULT_PROJECT: Default Project
+      # Studio-expected env var names (not STUDIO_DEFAULT_*) — the official
+      # Supabase docker-compose maps STUDIO_DEFAULT_* from .env onto these.
+      DEFAULT_ORGANIZATION_NAME: Default Organization
+      DEFAULT_PROJECT_NAME: Default Project
+      # Studio reaches postgres-meta DIRECTLY for schema/table introspection,
+      # not through Kong. Omitting this makes Studio default to localhost:8000
+      # and crash with ECONNREFUSED when loading the database dashboard.
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
       SUPABASE_URL: http://kong:8000
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       SUPABASE_ANON_KEY: \${ANON_KEY}
