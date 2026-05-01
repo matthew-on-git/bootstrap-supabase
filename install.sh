@@ -1252,13 +1252,35 @@ fi
 if [[ "$TLS_MODE" != "off" ]]; then
   banner "Postgres TCP Proxy"
 
+  # Auto-detect the host's primary external IP. Binding nginx to
+  # 0.0.0.0:5432 conflicts with the docker-proxy holding
+  # 127.0.0.1:5432 (Linux treats 0.0.0.0 as overlapping all interfaces
+  # including loopback) → EADDRINUSE on every reload, with nginx
+  # silently falling back to the old config. Binding to the specific
+  # non-loopback IP avoids the overlap.
+  #
+  # Override: set PG_PROXY_LISTEN_IP env var before running the script
+  # to pin a specific bind address (useful for multi-NIC hosts).
+  if [[ -z "${PG_PROXY_LISTEN_IP:-}" ]]; then
+    PG_PROXY_LISTEN_IP=$(ip -4 -o route get 1.1.1.1 2>/dev/null \
+      | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' \
+      | head -1)
+  fi
+  if [[ -z "$PG_PROXY_LISTEN_IP" || "$PG_PROXY_LISTEN_IP" =~ ^127\. ]]; then
+    log_warn "Could not detect external IP for Postgres TCP proxy — skipping."
+    log_warn "Set PG_PROXY_LISTEN_IP=<ip> and re-run if external Postgres access is needed."
+    PG_PROXY_LISTEN_IP=""
+  fi
+
   mkdir -p /etc/nginx/stream.d
-  cat >/etc/nginx/stream.d/postgres.conf <<'PGSTREAM'
+  if [[ -n "$PG_PROXY_LISTEN_IP" ]]; then
+    cat >/etc/nginx/stream.d/postgres.conf <<PGSTREAM
 # Postgres TCP proxy — managed by bootstrap-supabase
-# Listens on all interfaces; OPNsense (or upstream firewall) is
-# expected to block external WAN access on 5432.
+# Bound to the host's external interface (${PG_PROXY_LISTEN_IP}:5432) to
+# avoid overlap with the docker-proxy on 127.0.0.1:5432.
+# Upstream firewall is expected to block external WAN access on 5432.
 server {
-    listen 5432;
+    listen ${PG_PROXY_LISTEN_IP}:5432;
     proxy_pass 127.0.0.1:5432;
     # Postgres connections can be long-lived (CI migration, replication,
     # idle pooled clients). Default nginx stream timeout is 10 minutes —
@@ -1267,6 +1289,10 @@ server {
     proxy_connect_timeout 5s;
 }
 PGSTREAM
+    log_info "Postgres TCP proxy will listen on ${PG_PROXY_LISTEN_IP}:5432"
+  else
+    rm -f /etc/nginx/stream.d/postgres.conf
+  fi
 
   # Top-level `stream { ... }` must live OUTSIDE the http {} block.
   # Ubuntu's default nginx.conf includes conf.d/* only inside http,

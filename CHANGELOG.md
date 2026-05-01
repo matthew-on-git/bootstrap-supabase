@@ -7,16 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Postgres TCP stream proxy now binds to the host's primary external
+  IP (auto-detected via `ip route get 1.1.1.1`) instead of `0.0.0.0`.
+  The `0.0.0.0:5432` bind from the initial implementation conflicts
+  with the docker-proxy holding `127.0.0.1:5432` (Linux treats
+  `0.0.0.0` as overlapping with loopback) — every reload silently
+  failed with `EADDRINUSE` and nginx fell back to the previous config
+  with no listener. Override the auto-detected address with
+  `PG_PROXY_LISTEN_IP=<ip>` env var if needed (multi-NIC hosts).
+
 ### Added
 
 - nginx TCP stream proxy for Postgres on `:5432`. The supabase-db
   container stays bound to `127.0.0.1:5432` (no compose change), and
-  nginx now exposes Postgres on all host interfaces via the `stream`
-  module — same architectural pattern as the existing HTTP reverse
-  proxy. Enables external CI tooling (migration jobs, IDE clients) to
-  reach Postgres without rebinding the Docker port. Idempotent on
-  re-run; opt out by deleting `/etc/nginx/stream.d/postgres.conf` and
-  reloading nginx.
+  nginx exposes Postgres on the host's primary external interface via
+  the `stream` module — same architectural pattern as the existing
+  HTTP reverse proxy. Enables external CI tooling (migration jobs,
+  IDE clients) to reach Postgres without rebinding the Docker port.
+  Idempotent on re-run; opt out by deleting
+  `/etc/nginx/stream.d/postgres.conf` and reloading nginx.
 - `libnginx-mod-stream` added to apt packages when TLS is enabled
   (provides the dynamic stream module nginx needs for the above).
 
