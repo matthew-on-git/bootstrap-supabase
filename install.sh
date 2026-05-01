@@ -318,7 +318,11 @@ if ! command -v docker &>/dev/null; then
 fi
 
 if [[ "$TLS_MODE" != "off" ]]; then
-  apt_packages+=(nginx certbot)
+  # libnginx-mod-stream provides the TCP stream module used to proxy
+  # Postgres on :5432 (see "Postgres TCP Proxy" section below). It's
+  # bundled here so a fresh install gets the package in the same apt
+  # call as nginx itself.
+  apt_packages+=(nginx libnginx-mod-stream certbot)
   case "$TLS_MODE" in
   letsencrypt-http) apt_packages+=(python3-certbot-nginx) ;;
   dns-cloudflare) apt_packages+=(python3-certbot-dns-cloudflare) ;;
@@ -1225,6 +1229,63 @@ NGINX
   rm -f /etc/nginx/sites-enabled/default
   nginx -t && systemctl reload nginx
   log_info "nginx configured as TLS reverse proxy"
+fi
+
+######################################################################
+# nginx TCP stream proxy — Postgres on :5432
+######################################################################
+#
+# The supabase-db container is locked to 127.0.0.1:5432 by the compose
+# file (it does not expose Postgres to the network). External tooling
+# (CI migration jobs, IDE clients, BI tools) needs TCP access. Rather
+# than rebinding the docker port — which couples application config to
+# network exposure — front Postgres with nginx's `stream` module: same
+# pattern as the HTTP reverse proxy above, just for raw TCP.
+#
+# Idempotent on re-run: writes the stream config to /etc/nginx/stream.d/
+# every time, but only appends the top-level `stream { include ... }`
+# block to nginx.conf when not already present.
+#
+# To disable Postgres TCP exposure on a specific host: delete
+# /etc/nginx/stream.d/postgres.conf and reload nginx.
+
+if [[ "$TLS_MODE" != "off" ]]; then
+  banner "Postgres TCP Proxy"
+
+  mkdir -p /etc/nginx/stream.d
+  cat >/etc/nginx/stream.d/postgres.conf <<'PGSTREAM'
+# Postgres TCP proxy — managed by bootstrap-supabase
+# Listens on all interfaces; OPNsense (or upstream firewall) is
+# expected to block external WAN access on 5432.
+server {
+    listen 5432;
+    proxy_pass 127.0.0.1:5432;
+    # Postgres connections can be long-lived (CI migration, replication,
+    # idle pooled clients). Default nginx stream timeout is 10 minutes —
+    # bump to an hour to avoid surprise drops.
+    proxy_timeout 1h;
+    proxy_connect_timeout 5s;
+}
+PGSTREAM
+
+  # Top-level `stream { ... }` must live OUTSIDE the http {} block.
+  # Ubuntu's default nginx.conf includes conf.d/* only inside http,
+  # so we add a top-level include to nginx.conf — but only once.
+  if ! grep -q "include /etc/nginx/stream.d" /etc/nginx/nginx.conf; then
+    cat >>/etc/nginx/nginx.conf <<'STREAMINC'
+
+# Postgres TCP proxy — added by bootstrap-supabase
+stream {
+    include /etc/nginx/stream.d/*.conf;
+}
+STREAMINC
+    log_info "Added top-level stream include to /etc/nginx/nginx.conf"
+  else
+    log_info "Top-level stream include already present in /etc/nginx/nginx.conf"
+  fi
+
+  nginx -t && systemctl reload nginx
+  log_info "nginx stream proxy: 0.0.0.0:5432 → 127.0.0.1:5432 (Postgres)"
 fi
 
 ######################################################################
