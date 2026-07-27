@@ -1262,9 +1262,9 @@ if [[ "$TLS_MODE" != "off" ]]; then
   # Override: set PG_PROXY_LISTEN_IP env var before running the script
   # to pin a specific bind address (useful for multi-NIC hosts).
   if [[ -z "${PG_PROXY_LISTEN_IP:-}" ]]; then
-    PG_PROXY_LISTEN_IP=$(ip -4 -o route get 1.1.1.1 2>/dev/null \
-      | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' \
-      | head -1)
+    PG_PROXY_LISTEN_IP=$(ip -4 -o route get 1.1.1.1 2>/dev/null |
+      awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' |
+      head -1)
   fi
   if [[ -z "$PG_PROXY_LISTEN_IP" || "$PG_PROXY_LISTEN_IP" =~ ^127\. ]]; then
     log_warn "Could not detect external IP for Postgres TCP proxy — skipping."
