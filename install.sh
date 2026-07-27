@@ -318,7 +318,11 @@ if ! command -v docker &>/dev/null; then
 fi
 
 if [[ "$TLS_MODE" != "off" ]]; then
-  apt_packages+=(nginx certbot)
+  # libnginx-mod-stream provides the TCP stream module used to proxy
+  # Postgres on :5432 (see "Postgres TCP Proxy" section below). It's
+  # bundled here so a fresh install gets the package in the same apt
+  # call as nginx itself.
+  apt_packages+=(nginx libnginx-mod-stream certbot)
   case "$TLS_MODE" in
   letsencrypt-http) apt_packages+=(python3-certbot-nginx) ;;
   dns-cloudflare) apt_packages+=(python3-certbot-dns-cloudflare) ;;
@@ -926,6 +930,9 @@ services:
       PGRST_APP_SETTINGS_JWT_SECRET: \${JWT_SECRET}
       PGRST_APP_SETTINGS_JWT_EXP: "3600"
       PGRST_DB_MAX_ROWS: "1000"
+    # No healthcheck: postgrest/postgrest image is distroless (no shell, no
+    # curl, no wget), so CMD-SHELL cannot be executed. Consumers must rely on
+    # service_started and retry logic or start_period windows instead.
 
   # ── Realtime ───────────────────────────────────────────────────
   realtime:
@@ -1040,7 +1047,7 @@ services:
     restart: unless-stopped
     depends_on:
       kong:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./volumes/functions:/home/deno/functions:Z
       - deno-cache:/root/.cache/deno
@@ -1061,12 +1068,21 @@ services:
     restart: unless-stopped
     depends_on:
       kong:
+        condition: service_healthy
+      meta:
         condition: service_started
     ports:
       - "${KONG_BIND}:3000:3000"
     environment:
-      STUDIO_DEFAULT_ORGANIZATION: Default Organization
-      STUDIO_DEFAULT_PROJECT: Default Project
+      # Studio-expected env var names (not STUDIO_DEFAULT_*) — the official
+      # Supabase docker-compose maps STUDIO_DEFAULT_* from .env onto these.
+      DEFAULT_ORGANIZATION_NAME: Default Organization
+      DEFAULT_PROJECT_NAME: Default Project
+      # Studio reaches postgres-meta DIRECTLY for schema/table introspection,
+      # not through Kong. Omitting this makes Studio default to localhost:8000
+      # and crash with ECONNREFUSED when loading the database dashboard.
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD}
       SUPABASE_URL: http://kong:8000
       SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       SUPABASE_ANON_KEY: \${ANON_KEY}
@@ -1077,12 +1093,14 @@ services:
       LOGFLARE_API_KEY: \${LOGFLARE_API_KEY}
       LOGFLARE_URL: http://analytics:4000
       NEXT_PUBLIC_ENABLE_LOGS: "true"
+      HOSTNAME: "0.0.0.0"  # Next.js 16 binds to container hostname by default; force all-interfaces for health checks and Docker port mapping
       NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/platform/health').then(r=>{if(r.status!==200)throw r.status})"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>{if(r.status!==200)throw r.status})"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 ${ANALYTICS_BLOCK}
 
 volumes:
@@ -1159,8 +1177,22 @@ server {
 
     client_max_body_size 100m;
 
-    # API routes → Kong
-    location ~ ^/(rest|auth|realtime|storage|pg|graphql|functions|analytics)/v1(/|\$) {
+    # API routes → Kong (versioned endpoints)
+    location ~ ^/(rest|auth|realtime|storage|graphql|functions|analytics)/v1(/|\$) {
+        proxy_pass          http://kong_upstream;
+        proxy_set_header    Host \$host;
+        proxy_set_header    X-Real-IP \$remote_addr;
+        proxy_set_header    X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header    X-Forwarded-Proto \$scheme;
+        proxy_http_version  1.1;
+        proxy_set_header    Upgrade \$http_upgrade;
+        proxy_set_header    Connection "upgrade";
+        proxy_read_timeout  86400;
+    }
+
+    # Meta (postgres-meta) routes → Kong
+    # Meta API uses /pg/ prefix WITHOUT /v1 — separate location block required
+    location ~ ^/pg(/|\$) {
         proxy_pass          http://kong_upstream;
         proxy_set_header    Host \$host;
         proxy_set_header    X-Real-IP \$remote_addr;
@@ -1200,6 +1232,89 @@ NGINX
 fi
 
 ######################################################################
+# nginx TCP stream proxy — Postgres on :5432
+######################################################################
+#
+# The supabase-db container is locked to 127.0.0.1:5432 by the compose
+# file (it does not expose Postgres to the network). External tooling
+# (CI migration jobs, IDE clients, BI tools) needs TCP access. Rather
+# than rebinding the docker port — which couples application config to
+# network exposure — front Postgres with nginx's `stream` module: same
+# pattern as the HTTP reverse proxy above, just for raw TCP.
+#
+# Idempotent on re-run: writes the stream config to /etc/nginx/stream.d/
+# every time, but only appends the top-level `stream { include ... }`
+# block to nginx.conf when not already present.
+#
+# To disable Postgres TCP exposure on a specific host: delete
+# /etc/nginx/stream.d/postgres.conf and reload nginx.
+
+if [[ "$TLS_MODE" != "off" ]]; then
+  banner "Postgres TCP Proxy"
+
+  # Auto-detect the host's primary external IP. Binding nginx to
+  # 0.0.0.0:5432 conflicts with the docker-proxy holding
+  # 127.0.0.1:5432 (Linux treats 0.0.0.0 as overlapping all interfaces
+  # including loopback) → EADDRINUSE on every reload, with nginx
+  # silently falling back to the old config. Binding to the specific
+  # non-loopback IP avoids the overlap.
+  #
+  # Override: set PG_PROXY_LISTEN_IP env var before running the script
+  # to pin a specific bind address (useful for multi-NIC hosts).
+  if [[ -z "${PG_PROXY_LISTEN_IP:-}" ]]; then
+    PG_PROXY_LISTEN_IP=$(ip -4 -o route get 1.1.1.1 2>/dev/null \
+      | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' \
+      | head -1)
+  fi
+  if [[ -z "$PG_PROXY_LISTEN_IP" || "$PG_PROXY_LISTEN_IP" =~ ^127\. ]]; then
+    log_warn "Could not detect external IP for Postgres TCP proxy — skipping."
+    log_warn "Set PG_PROXY_LISTEN_IP=<ip> and re-run if external Postgres access is needed."
+    PG_PROXY_LISTEN_IP=""
+  fi
+
+  mkdir -p /etc/nginx/stream.d
+  if [[ -n "$PG_PROXY_LISTEN_IP" ]]; then
+    cat >/etc/nginx/stream.d/postgres.conf <<PGSTREAM
+# Postgres TCP proxy — managed by bootstrap-supabase
+# Bound to the host's external interface (${PG_PROXY_LISTEN_IP}:5432) to
+# avoid overlap with the docker-proxy on 127.0.0.1:5432.
+# Upstream firewall is expected to block external WAN access on 5432.
+server {
+    listen ${PG_PROXY_LISTEN_IP}:5432;
+    proxy_pass 127.0.0.1:5432;
+    # Postgres connections can be long-lived (CI migration, replication,
+    # idle pooled clients). Default nginx stream timeout is 10 minutes —
+    # bump to an hour to avoid surprise drops.
+    proxy_timeout 1h;
+    proxy_connect_timeout 5s;
+}
+PGSTREAM
+    log_info "Postgres TCP proxy will listen on ${PG_PROXY_LISTEN_IP}:5432"
+  else
+    rm -f /etc/nginx/stream.d/postgres.conf
+  fi
+
+  # Top-level `stream { ... }` must live OUTSIDE the http {} block.
+  # Ubuntu's default nginx.conf includes conf.d/* only inside http,
+  # so we add a top-level include to nginx.conf — but only once.
+  if ! grep -q "include /etc/nginx/stream.d" /etc/nginx/nginx.conf; then
+    cat >>/etc/nginx/nginx.conf <<'STREAMINC'
+
+# Postgres TCP proxy — added by bootstrap-supabase
+stream {
+    include /etc/nginx/stream.d/*.conf;
+}
+STREAMINC
+    log_info "Added top-level stream include to /etc/nginx/nginx.conf"
+  else
+    log_info "Top-level stream include already present in /etc/nginx/nginx.conf"
+  fi
+
+  nginx -t && systemctl reload nginx
+  log_info "nginx stream proxy: 0.0.0.0:5432 → 127.0.0.1:5432 (Postgres)"
+fi
+
+######################################################################
 # Start Services
 ######################################################################
 
@@ -1227,13 +1342,18 @@ for run in 1 2 3; do
 done
 
 log_info "Waiting for API gateway..."
+# Hit /rest/v1/ — a route Kong actually has. Expect 401 (Kong's auth plugin
+# rejecting a missing API key), which proves Kong is up AND the PostgREST
+# route is wired. Curling / returns Kong's 404 even when everything is fine.
 for attempt in $(seq 1 120); do
-  if curl -sf "http://127.0.0.1:${API_PORT}/" >/dev/null 2>&1; then
+  status=$(curl -s --max-time 2 -o /dev/null -w "%{http_code}" \
+    "http://127.0.0.1:${API_PORT}/rest/v1/" 2>/dev/null || echo "000")
+  if [[ "$status" == "401" ]]; then
     log_info "API gateway is healthy (attempt ${attempt}/120)"
     break
   fi
   if [[ $attempt -eq 120 ]]; then
-    log_warn "API gateway did not respond within 120s"
+    log_warn "API gateway did not respond within 120s (last status: ${status})"
     log_warn "Check: docker compose -f ${INSTALL_DIR}/docker-compose.yml logs"
   fi
   sleep 1
